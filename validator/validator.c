@@ -76,7 +76,7 @@ static void process_ds_response(struct module_qstate* qstate,
 	struct module_qstate* sub_qstate);
 
 
-/* Updates the suplied EDE (RFC8914) code selectively so we don't lose
+/* Updates the supplied EDE (RFC8914) code selectively, so we don't lose
  * a more specific code */
 static void
 update_reason_bogus(struct reply_info* rep, sldns_ede_code reason_bogus)
