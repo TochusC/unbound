@@ -566,6 +566,9 @@ tls\-system\-cert to load CA certs, otherwise the connections cannot be
 authenticated. This option enables TLS for all of them, but if you do not set
 this you can configure TLS specifically for some forward zones with
 forward\-tls\-upstream.  And also with stub\-tls\-upstream.
+If the tls\-upstream option is enabled, it is for all the forwards and stubs,
+where the forward\-tls\-upstream and stub\-tls\-upstream options are ignored,
+as if they had been set to yes.
 .TP
 .B ssl\-upstream: \fI<yes or no>
 Alternate syntax for \fBtls\-upstream\fR.  If both are present in the config
@@ -715,6 +718,18 @@ will be used where applicable for logging, ACL, DNSTAP, RPZ and IP ratelimiting.
 PROXYv2 is supported for UDP and TCP/TLS listening interfaces.
 There is no support for PROXYv2 on a DoH or DNSCrypt listening interface.
 Can list multiple, each on a new statement.
+.TP
+.B quic\-port: \fI<number>
+The port number on which to provide DNS-over-QUIC service, default 853, only
+interfaces configured with that port number as @number get the QUIC service.
+The interface uses QUIC for the UDP traffic on that port number.
+.TP
+.B quic\-size: \fI<size in bytes>
+Maximum number of bytes for all QUIC buffers and data combined. Default is 8
+megabytes. A plain number is in bytes, append 'k', 'm' or 'g' for kilobytes,
+megabytes or gigabytes (1024*1024 bytes in a megabyte). New connections receive
+connection refused when the limit is exceeded. New streams are reset when the
+limit is exceeded.
 .TP
 .B use\-systemd: \fI<yes or no>
 Enable or disable systemd socket activation.
@@ -887,9 +902,8 @@ outside of the chroot directory.
 Additionally, Unbound may need to access /dev/urandom (for entropy)
 from inside the chroot.
 .IP
-If given a chroot is done to the given directory. By default chroot is
-enabled and the default is "@UNBOUND_CHROOT_DIR@". If you give "" no
-chroot is performed.
+If given a chroot is done to the given directory. The chroot is by default 
+set to "@UNBOUND_CHROOT_DIR@". If you give "" no chroot is performed.
 .TP
 .B username: \fI<name>
 If given, after binding the port the user privileges are dropped. Default is
@@ -935,6 +949,10 @@ distinguished against.
 Sets logfile lines to use a timestamp in UTC ascii. Default is no, which
 prints the seconds since 1970 in brackets. No effect if using syslog, in
 that case syslog formats the timestamp printed into the log files.
+.TP
+.B log\-time\-iso:\fR <yes or no>
+Log time in ISO8601 format, if \fBlog\-time\-ascii:\fR yes is also set.
+Default is no.
 .TP
 .B log\-queries: \fI<yes or no>
 Prints one line per query to the log, with the log timestamp and IP address,
@@ -1037,11 +1055,11 @@ closer to that of BIND 9, while setting "\-1 \-1 \-1 \-1 \-1" gives behaviour
 rumoured to be closer to that of BIND 8.
 .TP
 .B harden\-short\-bufsize: \fI<yes or no>
-Very small EDNS buffer sizes from queries are ignored. Default is on, as
+Very small EDNS buffer sizes from queries are ignored. Default is yes, as
 described in the standard.
 .TP
 .B harden\-large\-queries: \fI<yes or no>
-Very large queries are ignored. Default is off, since it is legal protocol
+Very large queries are ignored. Default is no, since it is legal protocol
 wise to send these, and could be necessary for operation if TSIG or EDNS
 payload is very large.
 .TP
@@ -1088,10 +1106,23 @@ to increase the max depth that is checked to.
 .TP
 .B harden\-algo\-downgrade: \fI<yes or no>
 Harden against algorithm downgrade when multiple algorithms are
-advertised in the DS record.  If no, allows the weakest algorithm to
-validate the zone.  Default is no.  Zone signers must produce zones
-that allow this feature to work, but sometimes they do not, and turning
-this option off avoids that validation failure.
+advertised in the DS record.
+This works by first choosing only the strongest DS digest type as per RFC 4509
+(Unbound treats the highest algorithm as the strongest) and then
+expecting signatures from all the advertised signing algorithms from the chosen
+DS(es) to be present.
+If no, allows any algorithm to validate the zone.
+Default is no.
+RFC 6840 mandates that zone signers must produce zones signed with all
+advertised algorithms, but sometimes they do not.
+RFC 6840 also clarifies that this requirement is not for validators and
+validators should accept any single valid path.
+It should thus be explicitly noted that this option violates RFC 6840 for
+DNSSEC validation and should only be used to perform a signature
+completeness test to support troubleshooting.
+Using this option may break DNSSEC resolution with non-RFC6840-conforming
+signers and/or in multi-signer configurations that don't send all the
+advertised signatures.
 .TP
 .B harden\-unknown\-additional: \fI<yes or no>
 Harden against unknown records in the authority section and additional
@@ -1112,7 +1143,7 @@ queries.  For domains that do not support 0x20 and also fail with fallback
 because they keep sending different answers, like some load balancers.
 Can be given multiple times, for different domains.
 .TP
-.B caps\-whitelist: \fI<yes or no>
+.B caps\-whitelist: \fI<domain>
 Alternate syntax for \fBcaps\-exempt\fR.
 .TP
 .B qname\-minimisation: \fI<yes or no>
@@ -1176,10 +1207,11 @@ IP6 ::1 and IP4 127.0.0.1/8. If no, then localhost can be used to send
 queries to. Default is yes.
 .TP
 .B prefetch: \fI<yes or no>
-If yes, message cache elements are prefetched before they expire to
-keep the cache up to date.  Default is no.  Turning it on gives about
-10 percent more traffic and load on the machine, but popular items do
-not expire from the cache.
+If yes, cache hits on message cache elements that are on their last 10 percent
+of their TTL value trigger a prefetch to keep the cache up to date.
+Default is no.
+Turning it on gives about 10 percent more traffic and load on the machine, but
+popular items do not expire from the cache.
 .TP
 .B prefetch\-key: \fI<yes or no>
 If yes, fetch the DNSKEYs earlier in the validation process, when a DS
@@ -1199,12 +1231,13 @@ from the query ID, for speed and thread safety).  Default is yes.
 .B minimal-responses: \fI<yes or no>
 If yes, Unbound does not insert authority/additional sections into response
 messages when those sections are not required.  This reduces response
-size significantly, and may avoid TCP fallback for some responses.
-This may cause a slight speedup.  The default is yes, even though the DNS
+size significantly, and may avoid TCP fallback for some responses which may
+cause a slight speedup.  The default is yes, even though the DNS
 protocol RFCs mandate these sections, and the additional content could
-be of use and save roundtrips for clients.  Because they are not used,
-and the saved roundtrips are easier saved with prefetch, whilst this is
-faster.
+save roundtrips for clients that use the additional content.
+However these sections are hardly used by clients.
+Enabling prefetch can benefit clients that need the additional content
+by trying to keep that content fresh in the cache.
 .TP
 .B disable-dnssec-lame-check: \fI<yes or no>
 If true, disables the DNSSEC lameness check in the iterator.  This check
@@ -1369,9 +1402,10 @@ Default is no.
 .TP
 .B serve\-expired: \fI<yes or no>
 If enabled, Unbound attempts to serve old responses from cache with a
-TTL of \fBserve\-expired\-reply\-ttl\fR in the response without waiting for the
-actual resolution to finish.  The actual resolution answer ends up in the cache
-later on.  Default is "no".
+TTL of \fBserve\-expired\-reply\-ttl\fR in the response.
+By default the expired answer will be used after a resolution attempt errored
+out or is taking more than serve\-expired\-client\-timeout to resolve.
+Default is "no".
 .TP
 .B serve\-expired\-ttl: \fI<seconds>
 Limit serving of expired responses to configured seconds after expiration. 0
@@ -1391,12 +1425,14 @@ TTL value to use when replying with expired data.  If
 use 30 as the value (RFC 8767).  The default is 30.
 .TP
 .B serve\-expired\-client\-timeout: \fI<msec>
-Time in milliseconds before replying to the client with expired data.  This
-essentially enables the serve-stale behavior as specified in
+Time in milliseconds before replying to the client with expired data.
+This essentially enables the serve-stale behavior as specified in
 RFC 8767 that first tries to resolve before immediately
-responding with expired data.  A recommended value per
-RFC 8767 is 1800.  Setting this to 0 will disable this
-behavior.  Default is 0.
+responding with expired data.
+Setting this to 0 will disable this behavior and instead serve the expired
+record immediately from the cache before attempting to refresh it via
+resolution.
+Default is 1800.
 .TP
 .B serve\-original\-ttl: \fI<yes or no>
 If enabled, Unbound will always return the original TTL as received from
@@ -1977,7 +2013,7 @@ Default is 11.
 Limit on the number of upstream queries sent out for an incoming query and
 its subqueries from recursion. It is not reset during the resolution. When
 it is exceeded the query is failed and the lookup process stops.
-Default is 128.
+Default is 200.
 .TP 5
 .B fast\-server\-permil: \fI<number>
 Specify how many times out of 1000 to pick from the set of fastest servers.
@@ -2694,7 +2730,7 @@ Allow the ipsecmod functionality for the domain so that the module logic will be
 executed.  Can be given multiple times, for different domains.  If the option is
 not specified, all domains are treated as being allowed (default).
 .TP
-.B ipsecmod\-whitelist: \fI<yes or no>
+.B ipsecmod\-whitelist: \fI<domain>
 Alternate syntax for \fBipsecmod\-allow\fR.
 .SS "Cache DB Module Options"
 .LP
@@ -2809,6 +2845,14 @@ If this timeout expires Unbound closes the connection, treats it as
 if the Redis server does not have the requested data, and will try to
 re-establish a new connection later.
 This option defaults to 100 milliseconds.
+.TP
+.B redis-command-timeout: \fI<msec>\fR
+The timeout to use for redis commands, in milliseconds. If 0, it uses the
+redis\-timeout value. The default is 0.
+.TP
+.B redis-connect-timeout: \fI<msec>\fR
+The timeout to use for redis connection set up, in milliseconds. If 0, it
+uses the redis\-timeout value. The default is 0.
 .TP
 .B redis-expire-records: \fI<yes or no>
 If Redis record expiration is enabled.  If yes, Unbound sets timeout for Redis

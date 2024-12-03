@@ -214,6 +214,8 @@ mesh_create(struct module_stack* stack, struct module_env* env)
 	mesh->stats_dropped = 0;
 	mesh->ans_expired = 0;
 	mesh->ans_cachedb = 0;
+	mesh->num_queries_discard_timeout = 0;
+	mesh->num_queries_wait_limit = 0;
 	mesh->max_reply_states = env->cfg->num_queries_per_thread;
 	mesh->max_forever_states = (mesh->max_reply_states+1)/2;
 #ifndef S_SPLINT_S
@@ -311,7 +313,7 @@ int mesh_make_new_space(struct mesh_area* mesh, sldns_buffer* qbuf)
 
 struct dns_msg*
 mesh_serve_expired_lookup(struct module_qstate* qstate,
-	struct query_info* lookup_qinfo)
+	struct query_info* lookup_qinfo, int* is_expired)
 {
 	hashvalue_type h;
 	struct lruhash_entry* e;
@@ -321,6 +323,7 @@ mesh_serve_expired_lookup(struct module_qstate* qstate,
 	time_t timenow = *qstate->env->now;
 	int must_validate = (!(qstate->query_flags&BIT_CD)
 		|| qstate->env->cfg->ignore_cd) && qstate->env->need_to_validate;
+	*is_expired = 0;
 	/* Lookup cache */
 	h = query_info_hash(lookup_qinfo, qstate->query_flags);
 	e = slabhash_lookup(qstate->env->msg_cache, h, lookup_qinfo, 0);
@@ -328,6 +331,7 @@ mesh_serve_expired_lookup(struct module_qstate* qstate,
 
 	key = (struct msgreply_entry*)e->key;
 	data = (struct reply_info*)e->data;
+	if(data->ttl < timenow) *is_expired = 1;
 	msg = tomsg(qstate->env, &key->key, data, qstate->region, timenow,
 		qstate->env->cfg->serve_expired, qstate->env->scratch);
 	if(!msg)
@@ -422,7 +426,7 @@ void mesh_new_client(struct mesh_area* mesh, struct query_info* qinfo,
 		verbose(VERB_ALGO, "Too many queries waiting from the IP. "
 			"dropping incoming query.");
 		comm_point_drop_reply(rep);
-		mesh->stats_dropped++;
+		mesh->num_queries_wait_limit++;
 		return;
 	}
 	if(!unique)
@@ -1538,7 +1542,7 @@ void mesh_query_done(struct mesh_state* mstate)
 				http2_stream_remove_mesh_state(r->h2_stream);
 			comm_point_drop_reply(&r->query_reply);
 			mstate->reply_list = reply_list;
-			mstate->s.env->mesh->stats_dropped++;
+			mstate->s.env->mesh->num_queries_discard_timeout++;
 			continue;
 		}
 
@@ -2027,6 +2031,8 @@ mesh_stats_clear(struct mesh_area* mesh)
 {
 	if(!mesh)
 		return;
+	mesh->num_query_authzone_up = 0;
+	mesh->num_query_authzone_down = 0;
 	mesh->replies_sent = 0;
 	mesh->replies_sum_wait.tv_sec = 0;
 	mesh->replies_sum_wait.tv_usec = 0;
@@ -2040,6 +2046,8 @@ mesh_stats_clear(struct mesh_area* mesh)
 	memset(&mesh->ans_rcode[0], 0, sizeof(size_t)*UB_STATS_RCODE_NUM);
 	memset(&mesh->rpz_action[0], 0, sizeof(size_t)*UB_STATS_RPZ_ACTION_NUM);
 	mesh->ans_nodata = 0;
+	mesh->num_queries_discard_timeout = 0;
+	mesh->num_queries_wait_limit = 0;
 }
 
 size_t
@@ -2176,6 +2184,7 @@ mesh_serve_expired_callback(void* arg)
 	int must_validate = (!(qstate->query_flags&BIT_CD)
 		|| qstate->env->cfg->ignore_cd) && qstate->env->need_to_validate;
 	int i = 0;
+	int is_expired;
 	if(!qstate->serve_expired_data) return;
 	verbose(VERB_ALGO, "Serve expired: Trying to reply with expired data");
 	comm_timer_delete(qstate->serve_expired_data->timer);
@@ -2193,7 +2202,7 @@ mesh_serve_expired_callback(void* arg)
 		fptr_ok(fptr_whitelist_serve_expired_lookup(
 			qstate->serve_expired_data->get_cached_answer));
 		msg = (*qstate->serve_expired_data->get_cached_answer)(qstate,
-			lookup_qinfo);
+			lookup_qinfo, &is_expired);
 		if(!msg)
 			return;
 		/* Reset these in case we pass a second time from here. */
@@ -2267,7 +2276,7 @@ mesh_serve_expired_callback(void* arg)
 				http2_stream_remove_mesh_state(r->h2_stream);
 			comm_point_drop_reply(&r->query_reply);
 			mstate->reply_list = reply_list;
-			mstate->s.env->mesh->stats_dropped++;
+			mstate->s.env->mesh->num_queries_discard_timeout++;
 			continue;
 		}
 
@@ -2285,8 +2294,10 @@ mesh_serve_expired_callback(void* arg)
 
 		/* Add EDE Stale Answer (RCF8914). Ignore global ede as this is
 		 * warning instead of an error */
-		if (r->edns.edns_present && qstate->env->cfg->ede_serve_expired &&
-			qstate->env->cfg->ede) {
+		if(r->edns.edns_present &&
+			qstate->env->cfg->ede_serve_expired &&
+			qstate->env->cfg->ede &&
+			is_expired) {
 			edns_opt_list_append_ede(&r->edns.opt_list_out,
 				mstate->s.region, LDNS_EDE_STALE_ANSWER, NULL);
 		}

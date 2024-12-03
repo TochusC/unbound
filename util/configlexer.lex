@@ -269,6 +269,8 @@ http-query-buffer-size{COLON}	{ YDVAR(1, VAR_HTTP_QUERY_BUFFER_SIZE) }
 http-response-buffer-size{COLON} { YDVAR(1, VAR_HTTP_RESPONSE_BUFFER_SIZE) }
 http-nodelay{COLON}		{ YDVAR(1, VAR_HTTP_NODELAY) }
 http-notls-downstream{COLON}	{ YDVAR(1, VAR_HTTP_NOTLS_DOWNSTREAM) }
+quic-port{COLON}		{ YDVAR(1, VAR_QUIC_PORT) }
+quic-size{COLON}		{ YDVAR(1, VAR_QUIC_SIZE) }
 use-systemd{COLON}		{ YDVAR(1, VAR_USE_SYSTEMD) }
 do-daemonize{COLON}		{ YDVAR(1, VAR_DO_DAEMONIZE) }
 interface{COLON}		{ YDVAR(1, VAR_INTERFACE) }
@@ -431,6 +433,7 @@ permit-small-holddown{COLON}	{ YDVAR(1, VAR_PERMIT_SMALL_HOLDDOWN) }
 use-syslog{COLON}		{ YDVAR(1, VAR_USE_SYSLOG) }
 log-identity{COLON}		{ YDVAR(1, VAR_LOG_IDENTITY) }
 log-time-ascii{COLON}		{ YDVAR(1, VAR_LOG_TIME_ASCII) }
+log-time-iso{COLON}		{ YDVAR(1, VAR_LOG_TIME_ISO) }
 log-queries{COLON}		{ YDVAR(1, VAR_LOG_QUERIES) }
 log-replies{COLON}		{ YDVAR(1, VAR_LOG_REPLIES) }
 log-tag-queryreply{COLON}	{ YDVAR(1, VAR_LOG_TAG_QUERYREPLY) }
@@ -574,6 +577,8 @@ redis-server-port{COLON}	{ YDVAR(1, VAR_CACHEDB_REDISPORT) }
 redis-server-path{COLON}	{ YDVAR(1, VAR_CACHEDB_REDISPATH) }
 redis-server-password{COLON}	{ YDVAR(1, VAR_CACHEDB_REDISPASSWORD) }
 redis-timeout{COLON}		{ YDVAR(1, VAR_CACHEDB_REDISTIMEOUT) }
+redis-command-timeout{COLON}	{ YDVAR(1, VAR_CACHEDB_REDISCOMMANDTIMEOUT) }
+redis-connect-timeout{COLON}	{ YDVAR(1, VAR_CACHEDB_REDISCONNECTTIMEOUT) }
 redis-expire-records{COLON}	{ YDVAR(1, VAR_CACHEDB_REDISEXPIRERECORDS) }
 redis-logical-db{COLON}		{ YDVAR(1, VAR_CACHEDB_REDISLOGICALDB) }
 ipset{COLON}			{ YDVAR(0, VAR_IPSET) }
